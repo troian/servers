@@ -51,7 +51,7 @@ SIMULATE=true UDM_ROLES=pihole make udm-deploy
 TBD
 
 ## Secrets
-VPN secrets and SSH keys are retrieved using `1Password connect`. Should you wish to add support for Ansible vault - PRs are welcome
+VPN secrets and SSH keys are retrieved using [1Password connect](https://github.com/1Password/connect). Should you wish to add support for Ansible vault - PRs are welcome
 
 ## cni-plugins
 TBD
