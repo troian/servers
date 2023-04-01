@@ -1,0 +1,37 @@
+config:
+  dnsmasq: pihole
+  routing_table: 101
+  prefix: VPN_UA_
+  mark: "0x9"
+  pref: 99
+  gateway_table: auto
+  channel: "ua1"
+  killswitch_remove_on_exit: 1
+  remove_startup_blackholes: 1
+  provider:
+    type: external
+    external:
+      "ua1":
+        peer:
+          ip: "185.159.157.60"
+          port: "51820"
+          allowedIPs:
+            - 0.0.0.0/0
+            - 128.0.0.0/1
+            - ::/1
+            - 8000::/1
+          persistentKeepalive: 25
+        interface:
+          address: 10.2.0.2/32
+  dns:
+    ipv4: []
+rules:
+  domains:
+    exempt_domains: true
+    forced_domains: true
+  ip:
+    forced_destinations_ipv4: true
+    bypass_masquerade_ipv4: false
+    bypass_masquerade_ipv6: false
+    exempt_ipsets: true
+    forced_ipsets: true

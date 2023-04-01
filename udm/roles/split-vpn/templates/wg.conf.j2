@@ -1,0 +1,17 @@
+[Interface]
+# Key for udm-pro
+# NetShield = 1
+# Moderate NAT = off
+# VPN Accelerator = on
+PrivateKey = {{ secrets_interface_privatekey.field.value }}
+Address =  {{ vpn_channel_parameters.interface.address }}
+PostUp = sh /data/custom/split-vpn/updown.sh %i up
+PreDown = sh /data/custom/split-vpn/updown.sh %i down
+Table = {{ deploy_location.config.routing_table }}
+
+[Peer]
+# CH-UA#1
+PublicKey = {{ secrets_interface_publickey.field.value }}
+AllowedIPs = {{ vpn_channel_parameters.peer.allowedIPs | join(",") }}
+Endpoint = {{ vpn_channel_parameters.peer.ip }}:{{ vpn_channel_parameters.peer.port }}
+PersistentKeepalive = {% if vpn_channel_parameters.peer.persistentKeepAlive is defined %}{{ vpn_channel_parameters.peer.persistentKeepAlive }}{% else %}0{% endif %}

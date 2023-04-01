@@ -1,0 +1,12 @@
+#jinja2: trim_blocks:False
+[Unit]
+Description=mDNS Relayer
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /data/custom/scripts/multicast-relay.py --foreground --interfaces={{ config.mdns.interfaces | join(" ")}} {% if config.mdns.args is defined %}{{ config.mdns.args | join(" ") }}{% endif %}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

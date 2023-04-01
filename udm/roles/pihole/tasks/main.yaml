@@ -1,0 +1,73 @@
+---
+- name:
+  ansible.builtin.set_fact:
+    service_name: pihole
+
+- name: Ensure pihole updatelists dir
+  ansible.builtin.file:
+    path: "{{ host_data_path }}/etc-pihole/updatelists"
+    state: directory
+    mode: 0755
+  become: false
+
+- name: Ensure pihole lighttpd dir
+  ansible.builtin.file:
+    path: "{{ host_data_path }}/etc-pihole/lighttpd/conf-enabled"
+    state: directory
+    mode: 0755
+  become: false
+
+- name: "Get status of {{ service_name }} service"
+  when: inventory_hostname != 'localhost'
+  ansible.builtin.service_facts:
+
+- name: "Stop {{ service_name }} service if exists"
+  when: (inventory_hostname != 'localhost') and (service_name in ansible_facts.services)
+  ansible.builtin.systemd:
+    name: '{{ service_name }}'
+    enabled: false
+    state: stopped
+
+- name: "Render CNI configuration into dict"
+  when: config.pihole.cni is defined
+  delegate_to: localhost
+  ansible.builtin.set_fact:
+    cni_config: "{{ lookup('template', '{{ role_path }}/templates/20-pihole.conflist.j2') | from_yaml}}"
+
+- name: "Deploying {{ service_name }} script"
+  ansible.builtin.template:
+    dest: "{{ host_scripts_path }}/pihole.sh"
+    src: "{{ role_path }}/templates/pihole.sh.j2"
+    mode: 0775
+    lstrip_blocks: yes
+
+- name: "Deploying 15-pihole-admin-redirect-docker.conf"
+  ansible.builtin.template:
+    dest: "{{ host_data_path }}/etc-pihole/lighttpd/conf-enabled/15-pihole-admin-redirect-docker.conf"
+    src: "{{ role_path }}/files/15-pihole-admin-redirect-docker.conf"
+    lstrip_blocks: yes
+
+- name: "Deploying updatelists.conf"
+  ansible.builtin.template:
+    dest: "{{ host_data_path }}/etc-pihole/updatelists/updatelists.conf"
+    src: "{{ role_path }}/files/updatelists.conf"
+    lstrip_blocks: yes
+
+- name: "Deploy CNI configuration"
+  when: config.pihole.cni is defined
+  ansible.builtin.copy:
+    dest: "{{ host_data_path }}/podman/cni/20-pihole.conflist"
+    content: "{{ cni_config | ansible.builtin.to_json(indent=4, sort_keys=True) }}"
+
+- name: "Deploying {{ service_name }} service"
+  ansible.builtin.copy:
+    dest: "{{ host_root_path }}/etc/systemd/system/{{ service_name }}.service"
+    src: "{{ role_path }}/files/{{ service_name }}.service"
+
+- name: "Start {{ service_name }} service"
+  when: inventory_hostname != 'localhost'
+  ansible.builtin.systemd:
+    name: '{{ service_name }}'
+    enabled: true
+    daemon-reload: true
+    state: started

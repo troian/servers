@@ -1,0 +1,9 @@
+---
+all:
+  hosts:
+    localhost: # useful to have it for simulation purposes
+      ansible_connection: local
+  children:
+    udm:
+      hosts:
+        unifi.udm.local: {} # must match to the one from hosts above

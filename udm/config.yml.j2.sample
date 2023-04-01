@@ -1,0 +1,84 @@
+vault: op
+{% if not config.tz is defined %}
+tz: {{ ansible_date_time.tz }}
+{% endif %}
+mdns:
+  interfaces:
+    - br0
+    - br40
+  args:
+    - --noMDNS
+    - --noSonosDiscovery
+pihole:
+  version: 2023.03.1
+  container: pihole
+  hostname: pi.hole
+  # host location of pihole dnsmask
+  dnsmasq_config_dir: /data/custom/etc-pihole/dnsmasq.d
+  ui:
+# Enable to redirect this port to port 80 on the IP above.
+# This allows you to set the pihole to use port 81 or some other
+# port for the web, but be able to access it on port 80.
+    redirect_port: 81
+  net:
+    mac: "xx:xx:xx:xx:xx:xx"
+    bridge: br{{ config.pihole.vlan }}
+    iface: "br{{ config.pihole.vlan }}.pi"
+    forced_interfaces: []
+    ipv4:
+      ip: 192.168.{{ config.pihole.vlan }}.3
+      gw: 192.168.{{ config.pihole.vlan }}.1/24
+  env:
+   - "GS_ENABLE=false"
+  volumes:
+    - "/data/custom/etc-pihole/pihole/:/etc/pihole/"
+    - "/data/custom/etc-pihole/dnsmasq.d/:/etc/dnsmasq.d/"
+    - "/data/custom/etc-pihole/updatelists/updatelists.conf:/etc/pihole-updatelists/pihole-updatelists.conf"
+    - "/data/custom/etc-pihole/lighttpd/conf-enabled/15-pihole-admin-redirect-docker.conf:/etc/lighttpd/conf-enabled/15-pihole-admin-redirect-docker.conf"
+  cni:
+    mac: "xx:xx:xx:xx:xx:xx"
+    addresses:
+      - addr: 192.168.{{ config.pihole.vlan }}.3/24
+        gw: 192.168.{{ config.pihole.vlan }}.1
+    routes:
+      - dst: "0.0.0.0/0"
+vpn:
+  deploy: ua
+  locations:
+    ua:
+      config:
+        dnsmasq: pihole
+        routing_table: 101
+        mark: "0x9"
+        pref: 99
+        gateway_table: auto
+        channel: "ua1"
+        killswitch_remove_on_exit: 1
+        remove_startup_blackholes: 1
+        provider:
+          type: external
+          external:
+            "ua1":
+              peer:
+                ip: "<endpoint ip>"
+                port: "<endpoint port (wireguard default 51820)>"
+                allowedIPs:
+                  - 0.0.0.0/0
+                  - 128.0.0.0/1
+                  - ::/1
+                  - 8000::/1
+                persistentKeepalive: 25
+              interface:
+                address: 10.2.0.2/32
+        dns:
+          ipv4: []
+      rules:
+        domains:
+          exempt_domains: true
+          forced_domains: true
+        ip:
+          forced_destinations_ipv4: true
+          bypass_masquerade_ipv4: false
+          bypass_masquerade_ipv6: false
+          exempt_ipsets: true
+          forced_ipsets: true

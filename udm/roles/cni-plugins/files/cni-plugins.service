@@ -1,0 +1,11 @@
+[Unit]
+Description=Install CNI plugins
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=forking
+ExecStart=/data/custom/scripts/cni-plugins-install.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1 @@
+CURRENT_DIR = $(subst $(ROOT_DIR),,$(patsubst %/, %, $(dir $(word $(words $(MAKEFILE_LIST)),$(MAKEFILE_LIST)))))

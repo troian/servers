@@ -1,0 +1,153 @@
+---
+- name: Force limit
+  # 'all' is okay here, because the fail task will force the user to specify a limit on the command line, using -l or --limit
+  hosts: 'all'
+
+  tasks:
+  - name: checking limit arg
+    fail:
+      msg: "you must use -l or --limit - when you really want to use all hosts, use -l 'all'"
+    when: ansible_limit is not defined
+    run_once: true
+
+- name: Load config
+  hosts: 'all'
+  pre_tasks:
+    - name: Set sim root path
+      tags:
+        - always
+      when: inventory_hostname == 'localhost'
+      ansible.builtin.set_fact:
+        host_root_path: "{{ lookup('ansible.builtin.env', 'ROOT_PATH', default='') }}"
+
+    - name: Set remote root path
+      when: inventory_hostname != 'localhost'
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        host_root_path: ""
+
+    - name: Set remote data path
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        host_data_path: "{{ host_root_path }}/data/custom"
+
+    - name: Set remote scripts path
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        host_scripts_path: "{{ host_data_path }}/scripts"
+
+    - name: Create etc sim dirs on localhost
+      when: inventory_hostname == 'localhost'
+      tags:
+        - always
+      ansible.builtin.file:
+        path: "{{ host_root_path }}/etc/systemd/system"
+        state: directory
+        mode: 0755
+      become: false
+
+    - name: Ensure data and scripts dir
+      tags:
+        - always
+      ansible.builtin.file:
+        path: "{{ host_scripts_path }}"
+        state: directory
+        mode: 0755
+      become: false
+
+    - name: Load init variables
+      tags:
+        - always
+      delegate_to: localhost
+      ansible.builtin.shell: cat "vars.yml"
+      register: vars_content
+
+    - name: Convert params into dictionary
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        config: "{{ vars_content.stdout | from_yaml }}"
+
+    - name: Load config
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        config_content: "{{ lookup('template', './config.yml.j2') }}"
+
+    - name: Convert config into dictionary
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        config_dict: "{{ config_content | from_yaml }}"
+
+    - name: Merge vars and params into a config
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        config: "{{ config_dict | ansible.builtin.combine(config, recursive=true) }}"
+
+    - name: add 1password cache dir
+      tags:
+        - always
+      delegate_to: localhost
+      when: config.vault == "op"
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'CACHE_DIR') }}/vault/op"
+        state: directory
+
+    - name: add 1password creds
+      tags:
+        - always
+      delegate_to: localhost
+      when: config.vault == "op"
+      environment:
+        OP_CONNECT_HOST: ""
+        OP_CONNECT_TOKEN: ""
+      ansible.builtin.copy:
+        content: "{{ lookup('env', 'OP_CONNECT_CREDS') }}"
+        dest: "{{ lookup('env', 'CACHE_DIR') }}/vault/op/1password-credentials.json"
+
+    - name: Start one-password connect
+      tags:
+        - always
+      when: config.vault == "op"
+      delegate_to: localhost
+      ansible.builtin.shell: |
+        docker compose -f "{{ lookup('env', 'ROOT_DIR') }}/scripts/op/docker-compose.yml" up -d
+
+  post_tasks:
+    - name: stop 1password connect
+      tags:
+        - always
+      delegate_to: localhost
+      when: config.vault == "op"
+      ansible.builtin.shell: |
+        docker compose -f "{{ lookup('env', 'ROOT_DIR') }}/scripts/op/docker-compose.yml" down 
+
+    - name: remove 1password creds
+      tags:
+        - always
+      delegate_to: localhost
+      when: config.vault == "op"
+      ansible.builtin.shell:
+        rm -f "{{ lookup('env', 'CACHE_DIR') }}/vault/op/1password-credentials.json"
+
+  roles:
+    - role: mdns-relay
+      tags:
+        - mdns-relay
+    - role: cni-plugins
+      tags:
+        - cni-plugins
+    - role: podman
+      tags:
+        - podman
+    - role: pihole
+      tags:
+        - pihole
+    - role: split-vpn
+      tags:
+        - split-vpn

@@ -1,0 +1,177 @@
+---
+- name: Start service pihole if not started
+  when: inventory_hostname != 'localhost'
+  ansible.builtin.systemd:
+    name: pihole
+    state: restarted
+
+- name: "Deploying updown script"
+  ansible.builtin.copy:
+    dest: "{{ host_data_path }}/split-vpn/updown.sh"
+    src: "{{ role_path }}/files/scripts/updown.sh"
+    mode: 0755
+
+- name: "Deploying vpnctl script"
+  ansible.builtin.copy:
+    dest: "{{ host_data_path }}/split-vpn/vpnctl"
+    src: "{{ role_path }}/files/scripts/vpnctl"
+    mode: 0755
+
+- name: "Deploying add-vpn-iptables-rules script"
+  ansible.builtin.copy:
+    dest: "{{ host_data_path }}/split-vpn/add-vpn-iptables-rules.sh"
+    src: "{{ role_path }}/files/scripts/add-vpn-iptables-rules.sh"
+    mode: 0755
+
+- name: "Deploying add-dnsmasq-ipset script"
+  ansible.builtin.template:
+    dest: "{{ host_data_path }}/split-vpn/add-dnsmasq-ipset.sh"
+    src: "{{ role_path }}/files/scripts/add-dnsmasq-ipset.sh"
+    mode: 0755
+
+- name: Set location name
+  ansible.builtin.set_fact:
+    location_name: "{{ config.vpn.deploy }}"
+
+- name: Load VPN location
+  ansible.builtin.set_fact:
+    deploy_location: "{{ config.vpn.locations[location_name] }}"
+
+- name: Configure prefix
+  ansible.builtin.set_fact:
+    vpn_prefix: |
+      config:
+        prefix: "VPN_{{ location_name | upper }}_"
+
+- name: Configure prefix into dict
+  ansible.builtin.set_fact:
+    vpn_prefix: "{{ vpn_prefix | from_yaml }}"
+
+- name: Merge configs
+  ansible.builtin.set_fact:
+    deploy_location: "{{ deploy_location | ansible.builtin.combine(vpn_prefix, deploy_location, recursive=true) }}"
+
+- name: Set VPN device and service names
+  ansible.builtin.set_fact:
+    vpn_channel: '{{ deploy_location.config.channel }}'
+    vpn_device_name: 'svpn{{ deploy_location.config.channel }}'
+    service_name: "split-vpn-{{ deploy_location.config.channel }}"
+
+- name: Get service status
+  when: inventory_hostname != 'localhost'
+  ansible.builtin.service_facts:
+
+- name: Stop and disable service if running/exists
+  when: (inventory_hostname != 'localhost') and (service_name in ansible_facts.services)
+  ansible.builtin.systemd:
+    name: "{{ service_name }}"
+    state: stopped
+    enabled: false
+
+- name: Load VPN channel configuration
+  when: deploy_location.config.provider.type == "external"
+  ansible.builtin.set_fact:
+    vpn_channel_parameters: '{{ deploy_location.config.provider.external[vpn_channel] }}'
+
+- name: Find domain rules
+  delegate_to: localhost
+  ansible.builtin.find:
+    paths: "{{ role_path }}/files/wireguard/{{ location_name }}/domains"
+    file_type: file
+    recurse: no
+    patterns: "*"
+  register: loaded_domains
+  no_log: true
+
+- name: Find ip rules
+  delegate_to: localhost
+  ansible.builtin.find:
+    paths: '{{ role_path }}/files/wireguard/{{ location_name }}/ip'
+    file_type: file
+    recurse: no
+    patterns: "*"
+  register: loaded_ip
+  no_log: true
+
+- name: Set domain rules
+  delegate_to: localhost
+  ansible.builtin.set_fact:
+    vpn_domain_rules: "{{ loaded_domains | vpn_rules_filter(deploy_location.rules.domains) }}"
+  no_log: true
+
+- name: Set IP rules
+  delegate_to: localhost
+  ansible.builtin.set_fact:
+    vpn_ip_rules: '{{ loaded_ip | vpn_rules_filter(deploy_location.rules.ip) }}'
+  no_log: true
+
+- name: location config dir
+  delegate_to: localhost
+  ansible.builtin.set_fact:
+    location_configs_dir: "{{ host_data_path }}/split-vpn/wireguard/{{ vpn_device_name }}"
+
+- name: Create IPSETs config dir
+  ansible.builtin.file:
+    path: "{{ location_configs_dir }}/ipsets"
+    state: directory
+    mode: 0755
+  become: false
+
+- name: Deploy ipsets domains.conf
+  ansible.builtin.template:
+    dest: "{{ location_configs_dir }}/ipsets/domains.conf"
+    src: "{{ role_path }}/templates/domains.conf.j2"
+    lstrip_blocks: yes
+
+- name: Deploying vpn.conf
+  ansible.builtin.template:
+    dest: "{{ location_configs_dir }}/vpn.conf"
+    src: "{{ role_path }}/templates/vpn.conf.j2"
+    lstrip_blocks: yes
+
+- name: Load Interface PrivateKey
+  delegate_to: localhost
+  when: config.vault == "op"
+  environment:
+    OP_CONNECT_HOST: "{{ lookup('env', 'OP_CONNECT_HOST') }}"
+    OP_CONNECT_TOKEN: "{{ lookup('env', 'OP_CONNECT_TOKEN') }}"
+  onepassword.connect.field_info:
+    vault: "{{ lookup('ansible.builtin.env', 'OP_VAULT_ID') }}"
+    item: proton-vpn
+    field: privatekey
+  no_log: true
+  register: secrets_interface_privatekey
+
+- name: Load Peer PublicKey
+  delegate_to: localhost
+  when: config.vault == "op"
+  environment:
+    OP_CONNECT_HOST: "{{ lookup('env', 'OP_CONNECT_HOST') }}"
+    OP_CONNECT_TOKEN: "{{ lookup('env', 'OP_CONNECT_TOKEN') }}"
+  onepassword.connect.field_info:
+    vault: "{{ lookup('ansible.builtin.env', 'OP_VAULT_ID') }}"
+    item: proton-vpn
+    field: "{{ deploy_location.config.channel }}"
+  no_log: true
+  register: secrets_interface_publickey
+
+- name: "Deploying {{ vpn_device_name }}.conf"
+  ansible.builtin.template:
+    dest: "{{ location_configs_dir }}/{{ vpn_device_name }}.conf"
+    src: "{{ role_path }}/templates/wg.conf.j2"
+    mode: 0400
+    lstrip_blocks: yes
+
+- name: "Deploying {{ service_name }} service"
+  ansible.builtin.template:
+    dest: "{{ host_root_path }}/etc/systemd/system/{{ service_name }}.service"
+    src: "{{ role_path }}/templates/vpn.service.j2"
+    lstrip_blocks: yes
+
+- name: "Start {{ service_name }} service"
+  when: inventory_hostname != 'localhost'
+  ansible.builtin.systemd:
+    name: '{{ service_name }}'
+    daemon_reload: true
+    enabled: true
+    state: started

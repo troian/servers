@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# This script sets up the pihole macvlan network on the VLAN configured
+# below. The pihole network will remain on the host namespace and will
+# run alongside the UDM/P's dnsmasq.
+
+## configuration variables:
+
+BIF="{{ config.pihole.net.bridge }}"
+PIF="{{ config.pihole.net.iface }}"
+
+# IPv4 to assign to pihole network
+IPV4_IP="{% if config.pihole.net.ipv4 is defined %}{{ config.pihole.net.ipv4.ip }}{% endif %}"
+# shellcheck disable=SC2034
+IPV4_GW="{% if config.pihole.net.ipv4 is defined %}{{ config.pihole.net.ipv4.gw }}{% endif %}"
+
+# IPv6 to assign to pihole network
+# Can be empty or commented out for no IPv6
+# shellcheck disable=SC2034
+IPV6_IP="{% if config.pihole.net.ipv6 is defined %}{{ config.pihole.net.ipv6.ip }}{% endif %}"
+# shellcheck disable=SC2034
+IPV6_GW="{% if config.pihole.net.ipv6 is defined %}{{ config.pihole.net.ipv6.gw }}{% endif %}"
+
+# Set this to the interface(s) on which you want DNS TCP/UDP port 53 traffic
+# re-routed through the pihole. Separate interfaces with spaces.
+# e.g. "br0" or "br0 br1" etc.
+FORCED_INTFC="{% if config.pihole.net.forced_interfaces is defined %}{{ config.pihole.net.forced_interfaces | join(" ") }}{% endif %}"
+
+LISTEN_IPS="$IPV4_IP"
+if [ -n "$IPV6_IP" ]; then
+    LISTEN_IPS="${LISTEN_IPS},${IPV6_IP}"
+fi
+
+function on_exit() {
+    # TODO remove iptables rules if set
+{#    for intfc in ${FORCED_INTFC}; do#}
+{#        if [ -d "/sys/class/net/${intfc}" ]; then#}
+{#            for proto in udp tcp; do#}
+{#                prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV4_IP} ! -d ${IPV4_IP} --dport 53 -j LOG --log-prefix [DNAT-${intfc}-${proto}]"#}
+{#                iptables -t nat -C "${prerouting_rule}" 2>/dev/null || iptables -t nat -A "${prerouting_rule}"#}
+{#                prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV4_IP} ! -d ${IPV4_IP} --dport 53 -j DNAT --to ${IPV4_IP}"#}
+{#                iptables -t nat -C "${prerouting_rule}" || iptables -t nat -A "${prerouting_rule}"#}
+{#                if [ -n "${IPV6_IP}" ]; then#}
+{#                    prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV6_IP} ! -d ${IPV6_IP} --dport 53 -j LOG --log-prefix [DNAT-${intfc}-${proto}]"#}
+{#                    ip6tables -t nat -C "${prerouting_rule}" 2>/dev/null || ip6tables -t nat -A "${prerouting_rule}"#}
+{#                    prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV6_IP} ! -d ${IPV6_IP} --dport 53 -j DNAT --to [${IPV6_IP}]"#}
+{#                    ip6tables -t nat -C "${prerouting_rule}" || ip6tables -t nat -A "${prerouting_rule}"#}
+{#                fi#}
+{#            done#}
+{#        fi#}
+{#    done#}
+    ip link del "${PIF}" > /dev/null 2>&1
+}
+
+trap on_exit EXIT
+
+# set VLAN bridge promiscuous
+ip link set "${BIF}" promisc on
+
+# create macvlan bridge and add IPv4 IP
+ip link del "${PIF}" > /dev/null 2>&1
+ip link add "${PIF}" link "${BIF}" type macvlan mode bridge
+# Set this to a randomly generated MAC.
+ip link set dev "${PIF}" address "{{ config.pihole.net.mac }}"
+ip addr replace "${IPV4_IP}/32" dev "${PIF}" noprefixroute
+
+# (optional) add IPv6 IP to macvlan bridge
+if [ -n "${IPV6_IP}" ]; then
+    echo "add IPv6 IP to macvlan bridge"
+    ip -6 addr replace "${IPV6_IP}" dev "${PIF}" noprefixroute
+fi
+
+# set macvlan bridge promiscuous and bring it up
+ip link set "${PIF}" promisc on
+ip link set "${PIF}" up
+
+# Make DNSMasq listen to the container network for split horizon or conditional forwarding
+rm -f /run/dnsmasq.conf.d/pihole.conf
+echo "except-interface=${PIF}" >> /run/dnsmasq.conf.d/pihole.conf
+kill -9 "$(cat /run/dnsmasq.pid)"
+
+# Add listen address to the pihole's dnsmasq
+cat << EOF > "{{ config.pihole.dnsmasq_config_dir }}/03-interfaces.conf"
+bind-interfaces
+interface=${PIF}
+except-interface=lo
+listen-address=${LISTEN_IPS}
+EOF
+
+# Force DNS traffic to pihole
+for intfc in ${FORCED_INTFC}; do
+    if [ -d "/sys/class/net/${intfc}" ]; then
+        for proto in udp tcp; do
+            prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV4_IP} ! -d ${IPV4_IP} --dport 53 -j LOG --log-prefix [DNAT-${intfc}-${proto}]"
+            iptables -t nat -C "${prerouting_rule}" 2>/dev/null || iptables -t nat -A "${prerouting_rule}"
+            prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV4_IP} ! -d ${IPV4_IP} --dport 53 -j DNAT --to ${IPV4_IP}"
+            iptables -t nat -C "${prerouting_rule}" || iptables -t nat -A "${prerouting_rule}"
+            if [ -n "${IPV6_IP}" ]; then
+                prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV6_IP} ! -d ${IPV6_IP} --dport 53 -j LOG --log-prefix [DNAT-${intfc}-${proto}]"
+                ip6tables -t nat -C "${prerouting_rule}" 2>/dev/null || ip6tables -t nat -A "${prerouting_rule}"
+                prerouting_rule="PREROUTING -i ${intfc} -p ${proto} ! -s ${IPV6_IP} ! -d ${IPV6_IP} --dport 53 -j DNAT --to [${IPV6_IP}]"
+                ip6tables -t nat -C "${prerouting_rule}" || ip6tables -t nat -A "${prerouting_rule}"
+            fi
+        done
+    fi
+done
+
+# Add DNAT rule to redirect web port
+{% if config.pihole.ui.redirect_port is defined %}
+prerouting_rule="PREROUTING -p tcp -d $IPV4_IP --dport 80 -j DNAT --to ${IPV4_IP}:{{ config.pihole.ui.redirect_port }}"
+iptables -t nat -C "${prerouting_rule}" || iptables -t nat -A "${prerouting_rule}"
+if [ -n "$IPV6" ]; then
+    prerouting_rule="PREROUTING -p tcp -d $IPV6_IP --dport 80 -j DNAT --to [$IPV6_IP]:{{ config.pihole.ui.redirect_port }}"
+    ip6tables -t nat -C "${prerouting_rule}" || ip6tables -t nat -A "${prerouting_rule}"
+fi
+{% endif %}
+
+podman run \
+    --rm=true \
+    --network host \
+    --name {{ config.pihole.container }} \
+{% for volume in config.pihole.volumes %}
+    -v {{ volume }} \
+{% endfor %}
+    --dns=127.0.0.1 \
+    --privileged \
+    --hostname "{{ config.pihole.hostname }}" \
+    -e TZ={{ config.tz }} \
+    -e INTERFACE="${PIF}" \
+{% if config.pihole.ui.redirect_port is defined %}
+    -e WEB_PORT="{{ config.pihole.ui.redirect_port }}" \
+{%  endif %}
+{% if config.pihole.virtual_host is defined %}
+    -e VIRTUAL_HOST="{{ config.pihole.virtual_host }}" \
+{% else %}
+    -e VIRTUAL_HOST="{{ config.pihole.hostname }}" \
+{%  endif %}
+{% if config.pihole.proxy_location is defined %}
+    -e PROXY_LOCATION="{{ config.pihole.proxy_location }}" \
+{% else %}
+    -e PROXY_LOCATION="{{ config.pihole.hostname }}" \
+{%  endif %}
+{% if config.pihole.net.ipv4 is defined %}
+    -e FTLCONF_LOCAL_IPV4="{{ config.pihole.net.ipv4.ip }}" \
+{% else %}
+    IPv4="False" \
+{% endif %}
+{% if config.pihole.net.ipv6 is defined %}
+    -e FTLCONF_LOCAL_IPV4="{{ config.pihole.net.ipv6.ip }}" \
+{% else %}
+    -e IPv6="False" \
+{% endif %}
+{% if config.pihole.env is defined %}
+{% for env in config.pihole.env %}
+    -e {{ env }} \
+{% endfor %}
+{% endif %}
+{% if config.pihole.image is defined %}
+    {{ config.pihole.image }}:{{ config.pihole.version }}
+{% else %}
+    ghcr.io/troian/pihole:{{ config.pihole.version }}
+{% endif %}

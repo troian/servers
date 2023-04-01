@@ -1,0 +1,180 @@
+#jinja2: trim_blocks:False
+### SPLIT VPN OPTIONS ###
+# Enter multiple entries separated by spaces.
+# Do not enter square brackets around the entries.
+
+# Redirect IPv4 and IPv6 DNS to these addresses for VPN-destined traffic.
+# Note that many VPN providers redirect DNS going through their VPN network
+# to their own DNS servers. Redirection to other IPs might not work on all providers,
+# except for DNS redirects to a local address, or rejecting DNS traffic completely.
+#
+# IPV4 Format: [IP] to redirect to IP, "DHCP" if using OpenVPN or OpenConnect to obtain
+# DNS from DHCP options, or "REJECT" to reject all DNS traffic. "DHCP" is not supported on
+# other VPN types like wireguard/external.
+#
+# Example: Get DNS from DHCP
+DNS_IPV4_IP="{% if deploy_location.config.dns.ipv4 is defined %}{{ config.pihole.net.ipv4.ip }}{% endif %}"
+DNS_IPV4_PORT=53
+
+# Set this to the interface (brX) the DNS is on if it is a local IP. Leave blank for
+# non-local IPs. Local DNS redirects will not work without specifying the interface.
+DNS_IPV4_INTERFACE="{% if deploy_location.config.dns.ipv4 is defined %}{{ config.pihole.net.iface }}{% endif %}"
+
+# IPV6 Format: [IP] to redirect to IP, or "REJECT" to reject IPv6 DNS traffic completely.
+# IPV6 Format: [IP] to redirect to IP, "DHCP" if using OpenConnect to obtain DNS from DHCP
+# options, or "REJECT" to reject all DNS traffic. "DHCP" is not supported on
+# other VPN types.
+DNS_IPV6_IP="{% if deploy_location.config.dns.ipv6 is defined %}{{ config.pihole.net.ipv6.ip }}{% endif %}"
+DNS_IPV6_PORT=53
+
+DNS_IPV6_INTERFACE="{% if deploy_location.config.dns.ipv6 is defined %}{{ config.pihole.net.iface }}{% endif %}"
+
+# Enabling kill switch drops VPN-destined traffic that doesn't go through the VPN.
+KILLSWITCH={% if deploy_location.config.killswitch is defined %}{{ deploy_location.config.killswitch }}{% else %}0{% endif %}
+
+# Enable this only if you are testing, or you don't care about your real IP leaking
+# when the vpn client restarts or exits.
+REMOVE_KILLSWITCH_ON_EXIT={% if deploy_location.config.killswitch_remove_on_exit is defined %}{{ deploy_location.config.killswitch_remove_on_exit }}{% else %}0{% endif %}
+
+# Enable this if you added blackhole routes in the Unifi Settings to prevent Internet
+# access at system startup before the VPN script runs. This option removes the blackhole
+# routes to restore Internet access after the killswitch has been enabled.
+# If you do not set this to 1, openvpn will not be able to connect at startup, and your
+# Internet access will never be enabled until you manually remove the blackhole routes.
+# Set this to 0 only if you did not add any blackhole routes.
+REMOVE_STARTUP_BLACKHOLES={% if deploy_location.config.remove_startup_blackholes is defined %}{{ deploy_location.config.remove_startup_blackholes }}{% else %}0{% endif %}
+
+# Set the VPN provider.
+# "openvpn" for OpenVPN (default), "openconnect" for OpenConnect, "external" for wireguard,
+# or "nexthop" for an external VPN client.
+VPN_PROVIDER="{% if deploy_location.config.provider.type is defined%}{{ deploy_location.config.provider.type }}{% else %}default{% endif %}"
+
+# If using "external" for VPN_PROVIDER, set this to the VPN endpoint IP so that the
+# gateway route can be automatically added for the VPN endpoint.
+# OpenVPN passes the VPN endpoint IP to the script and will override these values.
+# These must be defined if using VPN_PROVIDER="nexthop".
+VPN_ENDPOINT_IPV4="185.159.157.60"
+VPN_ENDPOINT_IPV6=""
+
+# Set this to the route table that contains the gateway route, "auto", or "disabled".
+# The Ubiquiti route table is "201" if you're using Ethernet, "202" for SFP+, and
+# "203" for U-LTE.
+# Default is "auto" which works with WAN failover and automatically changes the endpoint
+# via gateway route when the WAN or gateway routes changes.
+# Set to "disabled" if you are using the nexthop option to connect to a VPN on your LAN.
+GATEWAY_TABLE="{% if deploy_location.config.gateway_table is defined %}{{ deploy_location.config.gateway_table }}{% else %}auto{% endif %}"
+
+# Set the MSS clamping on packets going out the VPN tunnel. Usually, it is not needed to
+# set this manually, but some VPN connections stall if the MSS clamping is not set correctly.
+# Typical values range from 1240 to 1460, but it could be lower.
+MSS_CLAMPING_IPV4="{% if deploy_location.config.ipv4.mss_clamping is defined %}{{ deploy_location.config.ipv4.mss_clamping }}{% endif %}"
+MSS_CLAMPING_IPV6="{% if deploy_location.config.ipv6.mss_clamping is defined %}{{ deploy_location.config.ipv6.mss_clamping }}{% endif %}"
+
+# Set this to the timer to use for the rule watcher (in seconds).
+# The script will wake up every N seconds to re-add rules if they're deleted by
+# the system, or change gateway routes if they changed. Default is 1 second.
+WATCHER_TIMER={% if deploy_location.config.watcher_timer is defined %}{{ deploy_location.config.watcher_timer }}{% else %}1{% endif %}
+
+# Bypass masquerade (SNAT) for these source IPs. This option should only be used if your
+# VPN server is set up to know how to route the subnet you do not want to masquerade
+# (e.g.: the "iroute" option in OpenVPN).
+# Set these options to ALL to disable masquerading completely.
+# Format: [IP/nn] or "ALL"
+BYPASS_MASQUERADE_IPV4="{% if vpn_ip_rules.bypass_masquerade_ipv4 is defined %}{{ vpn_ip_rules.bypass_masquerade_ipv4 }}{% endif %}"
+BYPASS_MASQUERADE_IPV6="{% if vpn_ip_rules.bypass_masquerade_ipv6 is defined %}{{ vpn_ip_rules.bypass_masquerade_ipv6 }}{% endif %}"
+
+# Options for custom table and chains.
+# These options need to be unique for each instance of vpn if running multiple.
+ROUTE_TABLE={{ deploy_location.config.routing_table }}
+MARK={{ deploy_location.config.mark }}
+PREFIX="{{ deploy_location.config.prefix }}"
+PREF={{ deploy_location.config.pref }}
+DEV={{ vpn_device_name }}
+
+# To execute commands when the VPN connects or disconnects, you can use the
+# callback functions hooks_pre_up, hooks_up, hooks_down, and
+# hooks_force_down. These functions will be invoked in response to VPN events
+# pre-up, up, down, and force-down respectively.
+#
+# For an example on using these hooks, please see vpn.conf.filled.sample.
+
+# Force these sources through the VPN.
+# Format: [brX] for interface. [IP/nn] for IP. [xx:xx:xx:xx:xx:xx] for mac.
+
+FORCED_SOURCE_INTERFACE="{% if vpn_ip_rules.forced_source_interface is defined %}{{ vpn_ip_rules.forced_source_interface }}{% endif %}"
+
+FORCED_SOURCE_IPV4="{% if vpn_ip_rules.forced_source_ipv4 is defined %}{{ vpn_ip_rules.forced_source_ipv4 }}{% endif %}"
+
+FORCED_SOURCE_IPV6="{% if vpn_ip_rules.forced_source_ipv6 is defined %}{{ vpn_ip_rules.forced_source_ipv6 }}{% endif %}"
+
+FORCED_SOURCE_MAC="{% if vpn_ip_rules.forced_source_mac is defined %}{{ vpn_ip_rules.forced_source_mac }}{% endif %}"
+
+# Format: [tcp/udp/both]-[IP/MAC Source]-[port1,port2:port3,port4,...]
+# Maximum 15 ports per entry.
+FORCED_SOURCE_IPV4_PORT="{% if vpn_ip_rules.forced_source_ipv4_port is defined %}{{ vpn_ip_rules.forced_source_ipv4_port }}{% endif %}"
+
+FORCED_SOURCE_IPV6_PORT="{% if vpn_ip_rules.forced_source_ipv6_port is defined %}{{ vpn_ip_rules.forced_source_ipv6_port }}{% endif %}"
+
+FORCED_SOURCE_MAC_PORT="{% if vpn_ip_rules.forced_source_mac_port is defined %}{{ vpn_ip_rules.forced_source_mac_port }}{% endif %}"
+
+# Force these destinations through the VPN. 
+# These destinations will be forced regardless of source.
+# Format: [IP/nn]
+FORCED_DESTINATIONS_IPV4="{% if vpn_ip_rules.forced_destinations_ipv4 is defined %}{{ vpn_ip_rules.forced_destinations_ipv4 }}{% endif %}"
+
+FORCED_DESTINATIONS_IPV6="{% if vpn_ip_rules.forced_destinations_ipv6 is defined %}{{ vpn_ip_rules.forced_destinations_ipv6 }}{% endif %}"
+
+# Force local UDM traffic going out of these WAN interfaces to go through the
+# VPN instead for both IPv4 and IPv6 traffic.
+# This does not include routed traffic, only local traffic generated by the UDM.
+# Do not enable this unless you want to force UDM local traffic through the VPN.
+# For UDM-Pro, set to "eth8" for WAN1/Ethernet port, or "eth9" for WAN2/SFP+ port, 
+# or "eth8 eth9" for both. For UDM Base, set to "eth1" for the WAN port.
+# This option might cause unintended problems, so disable it if you encounter any issues.
+FORCED_LOCAL_INTERFACE="{% if vpn_ip_rules.forced_local_interface is defined %}{{ vpn_ip_rules.forced_local_interface }}{% endif %}"
+
+# Exempt these sources from the VPN. 
+# Format: [IP/nn] for IP. [xx:xx:xx:xx:xx:xx] for mac.
+EXEMPT_SOURCE_IPV4="{% if vpn_ip_rules.exempt_source_ipv4 is defined %}{{ vpn_ip_rules.exempt_source_ipv4 }}{% endif %}"
+
+EXEMPT_SOURCE_IPV6="{% if vpn_ip_rules.exempt_source_ipv6 is defined %}{{ vpn_ip_rules.exempt_source_ipv6 }}{% endif %}"
+
+EXEMPT_SOURCE_MAC="{% if vpn_ip_rules.exempt_source_mac is defined %}{{ vpn_ip_rules.exempt_source_mac }}{% endif %}"
+
+# Format: [tcp/udp/both]-[IP/MAC Source]-[port1,port2:port3,port4,...]
+# Maximum 15 ports per entry.
+EXEMPT_SOURCE_IPV4_PORT="{% if vpn_ip_rules.exempt_source_ipv4_port is defined %}{{ vpn_ip_rules.exempt_source_ipv4_port }}{% endif %}"
+
+EXEMPT_SOURCE_IPV6_PORT="{% if vpn_ip_rules.exempt_source_ipv6_port is defined %}{{ vpn_ip_rules.exempt_source_ipv6_port }}{% endif %}"
+
+EXEMPT_SOURCE_MAC_PORT="{% if vpn_ip_rules.exempt_source_mac_port is defined %}{{ vpn_ip_rules.exempt_source_mac_port }}{% endif %}"
+
+# Exempt these destinations from the VPN. 
+# Format: [IP/nn]
+EXEMPT_DESTINATIONS_IPV4="{% if vpn_ip_rules.exempt_destinations_ipv4 is defined %}{{ vpn_ip_rules.exempt_destinations_ipv4 }}{% endif %}"
+
+EXEMPT_DESTINATIONS_IPV6="{% if vpn_ip_rules.exempt_destinations_ipv6 is defined %}{{ vpn_ip_rules.exempt_destinations_ipv6 }}{% endif %}"
+
+# Force/exempt these IP sets
+# IP sets need to be created before this script is run or the script will error.
+# IP sets can be updated externally and will be matched dynamically.
+# Each IP set entry consists of the IP set name and whether to match on source
+# or destination. src/dst needs to be specified for each IP set field.
+#
+# Enable NAT hairpin by exempting UBIOS_ADDRv4_ethX:dst for IPv4 or
+# UBIOS_ADDRv6_ethX:dst for IPv6 (where X = 8 for RJ45, or 9 for SFP+ WAN).
+# For IPv6 prefix delegation, exempt UBIOS_ADDRv6_brX, where X = VLAN number (0 = LAN).
+#
+# To allow communication with your VLAN subnets without hard coding the subnets,
+# exempt the UBIOS_NETv4_brX:dst ipset for IPv4 or UBIOS_NETv6_brX:dst for IPv6.
+#
+# Format: [IPSet Name]:[src/dst,src/dst,...]
+FORCED_IPSETS="{% if vpn_ip_rules.forced_ipsets is defined %}{{ vpn_ip_rules.forced_ipsets }}{% endif %}"
+
+EXEMPT_IPSETS="{% if vpn_ip_rules.exempt_ipsets is defined %}{{ vpn_ip_rules.exempt_ipsets }}{% endif %}"
+
+# VPN port forwards.
+# Format: [tcp/udp/both]-[VPN Port]-[Forward IP]-[Forward Port]
+PORT_FORWARDS_IPV4="{% if vpn_ip_rules.port_forwards_ipv4 is defined %}{{ vpn_ip_rules.port_forwards_ipv4 }}{% endif %}"
+
+PORT_FORWARDS_IPV6="{% if vpn_ip_rules.port_forwards_ipv6 is defined %}{{ vpn_ip_rules.port_forwards_ipv6 }}{% endif %}"

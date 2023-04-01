@@ -1,0 +1,33 @@
+---
+- name:
+  ansible.builtin.set_fact:
+    service_name: cni-plugins
+
+- name: 'Get status of {{ service_name }} service'
+  when: inventory_hostname != 'localhost'
+  ansible.builtin.service_facts:
+
+- name: "Stop {{ service_name }} service if exists"
+  when: (inventory_hostname != 'localhost') and (service_name in ansible_facts.services)
+  ansible.builtin.systemd:
+    name: '{{ service_name }}'
+    enabled: false
+    state: stopped
+
+- name: "Deploying {{ service_name }} script"
+  ansible.builtin.copy:
+    dest: "{{ host_scripts_path }}/cni-plugins-install.sh"
+    src: "{{ role_path }}/files/cni-plugins-install.sh"
+    mode: 0775
+
+- name: "Deploying {{ service_name }} service"
+  ansible.builtin.copy:
+    dest: "{{ host_root_path }}/etc/systemd/system/{{ service_name }}.service"
+    src: "{{ role_path }}/files/{{ service_name }}.service"
+
+- name: "Start {{ service_name }} service"
+  when: inventory_hostname != 'localhost'
+  ansible.builtin.systemd:
+    name: '{{ service_name }}'
+    enabled: true
+    state: started

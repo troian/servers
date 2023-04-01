@@ -1,0 +1,22 @@
+cniVersion: "0.4.0"
+name: "pihole"
+plugins:
+  - type: "macvlan"
+    mode: "bridge"
+    master: "{{ config.pihole.net.bridge }}"
+    mac: "{{ config.pihole.cni.mac }}"
+    ipam:
+      type: "static"
+{% if config.pihole.cni.addresses is defined %}
+      addresses:
+{% for address in config.pihole.cni.addresses %}
+        - address": "{{ address.addr }}"
+          gateway": "{{ address.gw }}"
+{% endfor %}
+{% endif %}
+{% if config.pihole.cni.routes is defined %}
+      routes:
+{% for route in config.pihole.cni.routes %}
+        - dst: "{{ route.dst }}"
+{% endfor %}
+{% endif %}

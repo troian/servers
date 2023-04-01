@@ -1,0 +1,10 @@
+[Unit]
+Description=Install podman
+Wants=cni-plugins.target
+After=cni-plugins.target
+
+[Service]
+ExecStart=/data/custom/scripts/podman-install.sh
+
+[Install]
+WantedBy=multi-user.target

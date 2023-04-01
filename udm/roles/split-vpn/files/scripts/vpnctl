@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+set -e
+
+if [[ $# -ne 2 ]]; then
+	echo "invalid amount of args"
+	exit 1
+fi
+
+vpn_dir=/data/custom/split-vpn/wireguard/$2
+vpn_dev="$2"
+
+if [ ! -d "$vpn_dir" ]; then
+	echo "configuration dir \"$vpn_dir\" does not exist"
+	exit 1
+fi
+
+if [ ! -f "$vpn_dir/vpn.conf" ]; then
+	echo "configuration file \"$vpn_dir/vpn.conf\" does not exist"
+	exit 1
+fi
+
+# shellcheck disable=SC2164
+cd "$vpn_dir"
+
+# Load configuration
+. ./vpn.conf
+
+cleanup () {
+	ip route flush table "${ROUTE_TABLE}"
+}
+
+trap 'cleanup' ERR
+
+up () {
+	# Add dnsmasq
+	"$(dirname "$0")"/add-dnsmasq-ipset.sh "${vpn_dev}"
+
+	# Load configuration and run wireguard tunnel
+	wg-quick up ./"${vpn_dev}".conf > wireguard.log 2>&1
+
+	cat wireguard.log
+}
+
+down () {
+	wg-quick down ./"${vpn_dev}".conf
+	cleanup
+}
+
+case "${1}" in
+	up)
+		if wg show "${vpn_dev}" > /dev/null 2>&1 ; then
+			echo "already running"
+			exit 1
+		else
+			up
+		fi
+		;;
+	down)
+		if ! wg show "${vpn_dev}" > /dev/null 2>&1 ; then
+			echo "not running"
+			exit 1
+		else
+			down
+		fi
+		;;
+	restart)
+		if wg show "${vpn_dev}" > /dev/null 2>&1 ; then
+			down
+		fi
+		up
+		;;
+	status)
+		wg show "${vpn_dev}"
+		;;
+	*)
+		echo "invalid command $1"
+		exit 1
+	;;
+esac

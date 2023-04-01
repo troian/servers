@@ -1,0 +1,12 @@
+[Unit]
+Description=Run split-vpn {{ vpn_device_name }} tunnel
+Wants=pihole.target
+After=pihole.target
+
+[Service]
+Type=forking
+ExecStart=/data/custom/split-vpn/vpnctl up {{ vpn_device_name }}
+ExecStop=/data/custom/split-vpn/vpnctl down {{ vpn_device_name }}
+
+[Install]
+WantedBy=multi-user.target

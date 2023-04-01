@@ -3,3 +3,4 @@ venv
 testfs
 inventory.yml
 .env
+__pycache__

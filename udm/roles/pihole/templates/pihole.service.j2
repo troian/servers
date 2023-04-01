@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Pi-Hole
+Wants=podman.target
+After=podman.target
+
+[Service]
+ExecStart=/data/custom/scripts/pihole.sh
+
+[Install]
+WantedBy=multi-user.target
