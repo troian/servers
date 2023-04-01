@@ -67,3 +67,9 @@ TBD
 
 ## split-vpn
 TBD
+
+## Credits
+The list of third party components used in this project, with due credits to their authors and license terms
+
+- [Split-VPN](https://github.com/peacey/split-vpn)
+- [mDNS-Relay](https://github.com/alsmith/multicast-relay)
